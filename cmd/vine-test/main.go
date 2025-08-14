@@ -4,5 +4,5 @@ import "github.com/umizu/vine"
 
 func main() {
 	v := vine.New()
-	v.Start()
+	v.Start(":9999")
 }

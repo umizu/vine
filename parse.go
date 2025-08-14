@@ -4,29 +4,28 @@ import (
 	"bytes"
 	"fmt"
 	"log/slog"
-	"net/http"
+	"net"
 	"strings"
-	"syscall"
 )
 
-func parseRequest(fd int) *http.Request {
+func parseRequest(conn net.Conn) *Request {
 	var (
-		req             http.Request
+		req             Request
 		read            int
 		endOfHeadersIdx int
 	)
 	buf := make([]byte, 4*1024)
 
 	for {
-		n, err := syscall.Read(fd, buf[read:])
+		n, err := conn.Read(buf[read:])
 		if err != nil {
-			slog.Error(err.Error(), "fd", fd)
+			slog.Error("conn read", "err", err)
 		}
 		read += n
 
 		endOfHeadersIdx = bytes.Index(buf, []byte{'\r', '\n', '\r', '\n'}) // todo: not necessary to check entire buffer per read
 		if endOfHeadersIdx != -1 {
-			// todo: capture bytes from requestbody, if any
+			// todo: capture bytes from request body, if any
 			break
 		}
 	}

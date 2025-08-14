@@ -1,7 +1,9 @@
 package vine
 
 import (
+	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"os/signal"
 	"syscall"
@@ -9,76 +11,53 @@ import (
 )
 
 type Vine struct {
-	errCh     chan error // stops server on receive
-	stopDelay int        // gracefully shutdown, in milliseconds
+	Listener net.Listener
+
+	shutdownDelay int // graceful shutdown (after closing listener)
 }
 
 func New() *Vine {
 	return &Vine{
-		errCh:     make(chan error, 1),
-		stopDelay: 1500,
+		shutdownDelay: 1000,
 	}
 }
 
-func (v *Vine) Start() error { // todo: add param 'listenAddr'
-	fd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM, 0)
+func (v *Vine) Start(address string) error {
+	l, err := net.Listen("tcp", address)
 	if err != nil {
 		return err
 	}
+	fmt.Printf("vine listening on %s\n", address)
 
-	if err := syscall.SetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1); err != nil {
-		return err
-	}
-
-	sa := &syscall.SockaddrInet4{
-		Port: 9999,
-		Addr: [4]byte{0, 0, 0, 0},
-	}
-
-	if err := syscall.Bind(fd, sa); err != nil {
-		return err
-	}
-
-	if err := syscall.Listen(fd, 0); err != nil {
-		return err
-	}
+	v.Listener = l
+	go v.acceptLoop()
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	<-sigs
 
-	go v.acceptLoop(fd)
-
-	select {
-	case <-sigs:
-		syscall.Close(fd)
-		time.Sleep(time.Millisecond * time.Duration(v.stopDelay))
-		break
-	case e := <-v.errCh:
-		err = e
-		break
+	if err := v.Listener.Close(); err != nil {
+		return err
 	}
 
-	return err
+	time.Sleep(time.Millisecond * time.Duration(v.shutdownDelay))
+	return nil
 }
 
-func (v *Vine) acceptLoop(sockfd int) {
+func (v *Vine) acceptLoop() {
 	for {
-		nfd, _, err := syscall.Accept(sockfd)
+		conn, err := v.Listener.Accept()
 		if err != nil {
 			slog.Debug("accept error", "err", err.Error())
 			continue
 		}
 
-		go v.handleConn(nfd)
+		go v.handleConn(conn)
 	}
 }
 
-func (v *Vine) handleConn(fd int) {
-	req := parseRequest(fd)
-
+func (v *Vine) handleConn(conn net.Conn) {
+	defer conn.Close()
+	req := parseRequest(conn)
 	_ = req // todo: handle
-
-	if err := syscall.Close(fd); err != nil {
-		slog.Error("close err", "err", err.Error())
-	}
 }
