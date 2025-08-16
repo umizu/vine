@@ -51,13 +51,23 @@ func (v *Vine) acceptLoop() {
 			slog.Debug("accept error", "err", err.Error())
 			continue
 		}
-
+		
 		go v.handleConn(conn)
 	}
 }
 
 func (v *Vine) handleConn(conn net.Conn) {
 	defer conn.Close()
-	req := parseRequest(conn)
+
+	req, err := parseRequest(conn)
+	if err != nil {
+		_, err := conn.Write(
+			[]byte("HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\n\r\n"))
+		if err != nil {
+			slog.Error(err.Error())
+		}
+		return
+	}
+
 	_ = req // todo: handle
 }
