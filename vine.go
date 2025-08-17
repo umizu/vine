@@ -13,6 +13,7 @@ import (
 type Vine struct {
 	Listener net.Listener
 
+
 	shutdownDelay int // graceful shutdown (after closing listener)
 }
 
@@ -51,7 +52,7 @@ func (v *Vine) acceptLoop() {
 			slog.Debug("accept error", "err", err.Error())
 			continue
 		}
-		
+
 		go v.handleConn(conn)
 	}
 }
@@ -68,6 +69,8 @@ func (v *Vine) handleConn(conn net.Conn) {
 		}
 		return
 	}
+
+	fmt.Printf("req: %v", req)
 
 	_ = req // todo: handle
 }
