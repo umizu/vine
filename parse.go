@@ -1,83 +1,71 @@
 package vine
 
 import (
-	"bytes"
+	"bufio"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net"
 	"strconv"
 	"strings"
 )
 
 var (
-	ErrInvalidReqFormat = errors.New("invalid request")
+	ErrMalformedReq = errors.New("invalid request")
 )
 
-func parseRequest(conn net.Conn) (*Request, error) {
-	var (
-		req             Request
-		totalRead       int
-		lastLineEndIdx  int
-		startLineParsed bool
-	)
-	buf := make([]byte, 4*1024)
+func parseRequest(req *Request, conn net.Conn) error {
+	var startLineParsed bool
+	reader := bufio.NewReader(conn)
 
 	for {
-		n, err := conn.Read(buf[totalRead:])
+		line, err := reader.ReadString('\n')
 		if err != nil {
-			slog.Error("conn read", "err", err)
+			return err
 		}
-		totalRead += n
+		if len(line) > 1 && line[len(line)-2] == '\r' { // remove CRLF / LF
+			line = line[:len(line)-2]
+		} else {
+			line = line[:len(line)-1]
+		}
 
-		// start line
+		// start-line
 		if !startLineParsed {
-			lineEnd := bytes.Index(buf[:totalRead], []byte{'\r', '\n'})
-			if lineEnd == -1 {
-				continue
-			}
-			if err := parseStartLine(&req, string(buf[:lineEnd])); err != nil {
-				return nil, err
+			if err := parseRequestLine(req, line); err != nil {
+				return err
 			}
 			startLineParsed = true
-			lastLineEndIdx = lineEnd + 2
+			continue
 		}
 
 		// headers
-		for {
-			lineEnd := bytes.Index(buf[lastLineEndIdx:totalRead], []byte("\r\n"))
-			if lineEnd == -1 {
-				break
-			}
-
-			lineEnd += lastLineEndIdx
-			line := string(buf[lastLineEndIdx:lineEnd])
-			lastLineEndIdx = lineEnd + 2
-
-			if line == "" { // request end
-				return &req, nil
-			}
-
-			colonIdx := strings.IndexByte(line, ':')
-			if colonIdx == -1 {
-				return nil, fmt.Errorf("malformed header: %q", line)
-			}
-			hKey := toPascalCaseHeader(line[:colonIdx])
-			hVal := strings.TrimSpace(line[colonIdx+1:])
-
-			if req.Headers == nil {
-				req.Headers = make(map[string][]string)
-			}
-
-			req.Headers[hKey] = strings.Split(hVal, ",")
+		if line == "" { // request end
+			return nil
 		}
+
+		if line[0] == ' ' || line[0] == '\t' {
+			continue
+		}
+
+		colonIdx := strings.IndexByte(line, ':')
+		if colonIdx == -1 {
+			return fmt.Errorf("malformed field-line: %q", line)
+		}
+		hKey := toPascalCaseHeader(line[:colonIdx])
+		hVal := strings.TrimSpace(line[colonIdx+1:])
+
+		if req.Headers == nil {
+			req.Headers = make(map[string][]string)
+		}
+
+		req.Headers[hKey] = strings.Split(hVal, ",")
 	}
+
 }
 
-func parseStartLine(r *Request, line string) error {
+func parseRequestLine(r *Request, line string) error {
 	parts := strings.Split(line, " ")
 	if len(parts) != 3 {
-		return ErrInvalidReqFormat
+		return ErrMalformedReq
 	}
 
 	r.Method = parts[0] // todo: validate?
@@ -86,23 +74,24 @@ func parseStartLine(r *Request, line string) error {
 
 	versionParts := strings.Split(parts[2], "/")
 	if len(versionParts) != 2 || versionParts[0] != "HTTP" {
-		return ErrInvalidReqFormat
+		return ErrMalformedReq
 	}
 
 	protoParts := strings.Split(versionParts[1], ".")
 	if len(protoParts) != 2 {
-		return ErrInvalidReqFormat
+		return ErrMalformedReq
 	}
 
 	protoMajor, err := strconv.Atoi(protoParts[0])
 	if err != nil {
-		return ErrInvalidReqFormat
+		return ErrMalformedReq
 	}
 	r.ProtoMajor = protoMajor
 
 	protoMinor, err := strconv.Atoi(protoParts[1])
 	if err != nil {
-		return ErrInvalidReqFormat
+		fmt.Print("hit3")
+		return ErrMalformedReq
 	}
 	r.ProtoMinor = protoMinor
 

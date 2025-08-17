@@ -13,7 +13,6 @@ import (
 type Vine struct {
 	Listener net.Listener
 
-
 	shutdownDelay int // graceful shutdown (after closing listener)
 }
 
@@ -31,7 +30,7 @@ func (v *Vine) Start(address string) error {
 	fmt.Printf("vine listening on %s\n", address)
 
 	v.Listener = l
-	go v.acceptLoop()
+	go v.serve()
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
@@ -45,7 +44,7 @@ func (v *Vine) Start(address string) error {
 	return nil
 }
 
-func (v *Vine) acceptLoop() {
+func (v *Vine) serve() {
 	for {
 		conn, err := v.Listener.Accept()
 		if err != nil {
@@ -53,20 +52,18 @@ func (v *Vine) acceptLoop() {
 			continue
 		}
 
-		go v.handleConn(conn)
+		go handleConn(conn)
 	}
 }
 
-func (v *Vine) handleConn(conn net.Conn) {
+func handleConn(conn net.Conn) {
 	defer conn.Close()
+	var req Request
 
-	req, err := parseRequest(conn)
-	if err != nil {
-		_, err := conn.Write(
+	if err := parseRequest(&req, conn); err != nil {
+		slog.Error(err.Error())
+		conn.Write(
 			[]byte("HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\n\r\n"))
-		if err != nil {
-			slog.Error(err.Error())
-		}
 		return
 	}
 
