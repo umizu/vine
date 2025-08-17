@@ -17,40 +17,64 @@ var (
 func parseRequest(conn net.Conn) (*Request, error) {
 	var (
 		req             Request
-		read            int
-		startlineEndIdx int
+		totalRead       int
+		lastLineEndIdx  int
 		startLineParsed bool
 	)
-
 	buf := make([]byte, 4*1024)
+
 	for {
-		n, err := conn.Read(buf[read:])
+		n, err := conn.Read(buf[totalRead:])
 		if err != nil {
 			slog.Error("conn read", "err", err)
 		}
-		read += n
+		totalRead += n
 
+		// start line
 		if !startLineParsed {
-			startlineEndIdx = bytes.Index(buf[:read], []byte{'\r', '\n'})
-			if startlineEndIdx == -1 {
+			lineEnd := bytes.Index(buf[:totalRead], []byte{'\r', '\n'})
+			if lineEnd == -1 {
 				continue
 			}
-			if err := parseStartLine(&req, string(buf[:startlineEndIdx])); err != nil {
+			if err := parseStartLine(&req, string(buf[:lineEnd])); err != nil {
 				return nil, err
 			}
 			startLineParsed = true
-			fmt.Print("startLine parsed successfully")
+			lastLineEndIdx = lineEnd + 2
 		}
 
-		break
-	}
+		// headers
+		for {
+			lineEnd := bytes.Index(buf[lastLineEndIdx:totalRead], []byte("\r\n"))
+			if lineEnd == -1 {
+				break
+			}
 
-	return &req, nil
+			lineEnd += lastLineEndIdx
+			line := string(buf[lastLineEndIdx:lineEnd])
+			lastLineEndIdx = lineEnd + 2
+
+			if line == "" { // request end
+				return &req, nil
+			}
+
+			colonIdx := strings.IndexByte(line, ':')
+			if colonIdx == -1 {
+				return nil, fmt.Errorf("malformed header: %q", line)
+			}
+			hKey := toPascalCaseHeader(line[:colonIdx])
+			hVal := strings.TrimSpace(line[colonIdx+1:])
+
+			if req.Headers == nil {
+				req.Headers = make(map[string][]string)
+			}
+
+			req.Headers[hKey] = strings.Split(hVal, ",")
+		}
+	}
 }
 
 func parseStartLine(r *Request, line string) error {
-	fmt.Println("parsing start line:", line)
-
 	parts := strings.Split(line, " ")
 	if len(parts) != 3 {
 		return ErrInvalidReqFormat
@@ -83,4 +107,14 @@ func parseStartLine(r *Request, line string) error {
 	r.ProtoMinor = protoMinor
 
 	return nil
+}
+
+func toPascalCaseHeader(header string) string {
+	parts := strings.Split(header, "-")
+	for i, p := range parts {
+		if len(p) > 0 {
+			parts[i] = strings.ToUpper(p[:1]) + strings.ToLower(p[1:])
+		}
+	}
+	return strings.Join(parts, "-")
 }
