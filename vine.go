@@ -62,8 +62,14 @@ func handleConn(conn net.Conn) {
 
 	if err := parseRequest(&req, conn); err != nil {
 		slog.Error(err.Error())
-		conn.Write(
-			[]byte("HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\n\r\n"))
+		fmt.Fprint(conn,
+			"HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\n\r\n")
+		return
+	}
+
+	if err := req.Validate(); err != nil {
+		fmt.Fprintf(conn,
+			"HTTP/1.1 400 Bad Request: %s\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\n\r\n400 Bad Request: %s\r\n\r\n", err, err)
 		return
 	}
 
